@@ -68,45 +68,67 @@
     </div>
 
 <script>
-        // Switched to HandyAPI, which allows frontend CORS requests (Netlify) and is free.
-        const API_URL = "https://data.handyapi.com/bin/";
-
         /**
-         * Fetches BIN information from HandyAPI
+         * Fetches BIN information using a "Fallback" method.
+         * Tries HandyAPI first. If not found, uses a proxy to check BinList.
          */
         async function fetchBinInfo(cardNumber) {
             const cleanNumber = cardNumber.toString().replace(/\D/g, '');
             if (cleanNumber.length < 6) return { error: "Invalid BIN (too short)" };
-            
             const bin = cleanNumber.substring(0, 6);
 
+            // ==========================================
+            // ATTEMPT 1: Handy API (Fast, Native CORS)
+            // ==========================================
             try {
-                const response = await fetch(API_URL + bin);
-                
-                // Handle basic HTTP errors
-                if (response.status === 429) return { error: "Rate limit exceeded. Slow down." };
-                if (!response.ok) return { error: "Server/Network error" };
-                
-                const data = await response.json();
-                
-                // HandyAPI returns a "Status" string, usually "SUCCESS" or "NOT FOUND"
-                if (!data.Status || data.Status !== "SUCCESS") {
-                    return { error: "BIN not found in database" };
+                const response = await fetch(`https://data.handyapi.com/bin/${bin}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.Status === "SUCCESS") {
+                        return {
+                            bin: bin,
+                            scheme: data.Scheme || 'N/A',
+                            type: data.Type || 'N/A',
+                            bank: data.Issuer || 'N/A',
+                            country: data.Country ? data.Country.Name : 'N/A'
+                        };
+                    }
                 }
-
-                // Map the data using HandyAPI's structure
-                return {
-                    bin: bin,
-                    scheme: data.Scheme || 'N/A',
-                    type: data.Type || 'N/A',
-                    bank: data.Issuer || 'N/A',
-                    country: data.Country ? data.Country.Name : 'N/A',
-                    countryCode: data.Country ? data.Country.A2 : ''
-                };
             } catch (err) {
-                console.error(err);
-                return { error: "Network error / CORS blocked" };
+                console.warn("HandyAPI failed, trying fallback...");
             }
+
+            // ==========================================
+            // ATTEMPT 2: BinList via AllOrigins Proxy
+            // (Bypasses the CORS block you had earlier)
+            // ==========================================
+            try {
+                // Using allorigins.win to bypass Netlify CORS blocks
+                const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent('https://lookup.binlist.net/' + bin)}`;
+                const response = await fetch(proxyUrl);
+                
+                if (response.ok) {
+                    const proxyData = await response.json();
+                    
+                    if (proxyData.contents) {
+                        const data = JSON.parse(proxyData.contents);
+                        if (data.scheme) {
+                            return {
+                                bin: bin,
+                                scheme: data.scheme || 'N/A',
+                                type: data.type || 'N/A',
+                                bank: data.bank ? data.bank.name : 'N/A',
+                                country: data.country ? data.country.name : 'N/A'
+                            };
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error("Fallback API also failed.");
+            }
+
+            // If BOTH databases don't have it:
+            return { error: "BIN not found in public databases" };
         }
 
         /**
@@ -122,7 +144,7 @@
             }
 
             resultDiv.classList.remove('hidden');
-            resultDiv.innerHTML = `<p class="text-gray-500">Loading data for BIN...</p>`;
+            resultDiv.innerHTML = `<p class="text-gray-500">Searching multiple databases...</p>`;
 
             const data = await fetchBinInfo(input);
 
@@ -135,7 +157,7 @@
                         <div><p class="text-xs text-gray-500">Brand</p><p class="font-bold capitalize">${data.scheme}</p></div>
                         <div><p class="text-xs text-gray-500">Type</p><p class="font-bold capitalize ${data.type.toLowerCase() === 'credit' ? 'text-blue-600' : 'text-green-600'}">${data.type}</p></div>
                         <div><p class="text-xs text-gray-500">Bank</p><p class="font-bold">${data.bank}</p></div>
-                        <div class="col-span-2 md:col-span-4"><p class="text-xs text-gray-500">Country</p><p class="font-bold">${data.country} ${data.countryCode ? `(${data.countryCode})` : ''}</p></div>
+                        <div class="col-span-2 md:col-span-4"><p class="text-xs text-gray-500">Country</p><p class="font-bold">${data.country}</p></div>
                     </div>
                 `;
             }
@@ -162,14 +184,11 @@
                 complete: async function(results) {
                     tbody.innerHTML = ''; 
                     const rows = results.data;
-                    
-                    // Limited to 500 to prevent browser crashes, but you can adjust this.
                     const maxRows = Math.min(rows.length, 500);
 
                     let cardColumnKey = null;
                     if (rows.length > 0) {
                         const keys = Object.keys(rows[0]);
-                        // Try to auto-detect the column containing the BINs
                         cardColumnKey = keys.find(k => k.toLowerCase().includes('card') || k.toLowerCase().includes('cc') || k.toLowerCase().includes('no') || k.toLowerCase().includes('bin'));
                         if (!cardColumnKey) cardColumnKey = keys[0]; 
                     }
@@ -192,14 +211,14 @@
                         tr.className = "border-b hover:bg-gray-50";
                         tr.innerHTML = `
                             <td class="p-3 font-mono text-gray-700">${bin}</td>
-                            <td class="p-3 text-gray-400 italic" colspan="4">Fetching...</td>
+                            <td class="p-3 text-gray-400 italic" colspan="4">Checking databases...</td>
                         `;
                         tbody.appendChild(tr);
 
                         const data = await fetchBinInfo(bin);
                         
-                        // 1 second delay between requests. Required so HandyAPI doesn't block your IP.
-                        await new Promise(r => setTimeout(r, 1000)); 
+                        // 1.5 second delay to ensure the free APIs don't block you
+                        await new Promise(r => setTimeout(r, 1500)); 
                         
                         if (data.error) {
                             tr.innerHTML = `
