@@ -4,33 +4,23 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BIN / Card Checker Tool</title>
+    <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- PapaParse for reading CSV files reliably -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 </head>
 <body class="bg-gray-50 min-h-screen p-8">
-    <div class="max-w-5xl mx-auto space-y-6">
+    <div class="max-w-5xl mx-auto space-y-8">
         
+        <!-- Header -->
         <div class="text-center">
             <h1 class="text-3xl font-bold text-gray-800">Secure BIN Lookup Tool</h1>
-            <p class="text-gray-500 mt-2">Powered by binsearchlookup.com</p>
-        </div>
-
-        <!-- API Configuration Section -->
-        <div class="bg-blue-50 p-6 rounded-lg shadow-sm border border-blue-200">
-            <h2 class="text-lg font-semibold text-blue-800 mb-4">Step 1: API Configuration</h2>
-            <div class="flex flex-col md:flex-row gap-4 items-center">
-                <label class="text-sm font-medium text-blue-900 w-full md:w-auto">Your API Key:</label>
-                <input type="password" id="apiKey" placeholder="Paste YOUR_KEY here" 
-                    class="flex-1 w-full px-4 py-2 border border-blue-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-            </div>
-            <p class="text-xs text-blue-600 mt-3">
-                * Your User ID (<code class="bg-blue-100 px-1 rounded">35ae4402-1ac3-41ca-a3ff-4a43b66aded4</code>) is already configured in the code.
-            </p>
+            <p class="text-gray-500 mt-2">Powered by FreeBINChecker.com</p>
         </div>
 
         <!-- Manual Input Section -->
         <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-            <h2 class="text-xl font-semibold mb-4">Step 2: Manual Entry</h2>
+            <h2 class="text-xl font-semibold mb-4">Manual Entry</h2>
             <div class="flex gap-4">
                 <input type="text" id="manualInput" placeholder="Enter Card Number or 6-digit BIN" 
                     class="flex-1 px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
@@ -39,12 +29,15 @@
                     Check BIN
                 </button>
             </div>
-            <div id="manualResult" class="mt-4 hidden"></div>
+            <div id="manualResult" class="mt-4 hidden">
+                <!-- Manual results will appear here -->
+            </div>
         </div>
 
         <!-- CSV Upload Section -->
         <div class="bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-            <h2 class="text-xl font-semibold mb-4">Step 3: Batch CSV Upload</h2>
+            <h2 class="text-xl font-semibold mb-4">Batch CSV Upload</h2>
+            <p class="text-sm text-gray-500 mb-4">Upload a CSV file containing your card numbers.</p>
             <div class="flex items-center gap-4 mb-4">
                 <input type="file" id="csvFile" accept=".csv" 
                     class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100">
@@ -54,6 +47,7 @@
                 </button>
             </div>
             
+            <!-- Table for CSV Results -->
             <div class="overflow-x-auto mt-6">
                 <table class="w-full text-left border-collapse" id="resultsTable">
                     <thead>
@@ -65,56 +59,61 @@
                             <th class="p-3 text-sm font-semibold text-gray-600">Country</th>
                         </tr>
                     </thead>
-                    <tbody id="tableBody"></tbody>
+                    <tbody id="tableBody">
+                        <!-- CSV rows will be injected here -->
+                    </tbody>
                 </table>
             </div>
         </div>
     </div>
 
     <script>
-        const API_URL = "https://api.binsearchlookup.com/lookup?bin=";
-        const USER_ID = "35ae4402-1ac3-41ca-a3ff-4a43b66aded4";
+        const API_URL = "https://api.freebinchecker.com/bin/";
 
+        /**
+         * Fetches BIN information from FreeBinChecker
+         */
         async function fetchBinInfo(cardNumber) {
-            // Get the API key from the input box
-            const apiKey = document.getElementById('apiKey').value.trim();
-            if (!apiKey) {
-                return { error: "Please paste your API Key in Step 1 first." };
-            }
-
             const cleanNumber = cardNumber.toString().replace(/\D/g, '');
             if (cleanNumber.length < 6) return { error: "Invalid BIN (too short)" };
+            
+            // Extract the first 6 digits
             const bin = cleanNumber.substring(0, 6);
 
             try {
-                // Use the headers exactly as requested in your cURL command
-                const response = await fetch(API_URL + bin, {
-                    method: 'GET',
-                    headers: {
-                        'X-API-Key': apiKey,
-                        'X-User-ID': USER_ID
-                    }
-                });
+                // If you get CORS errors, uncomment the proxy line below and use proxyUrl in the fetch instead
+                const targetUrl = API_URL + bin;
+                // const proxyUrl = "https://corsproxy.io/?" + encodeURIComponent(targetUrl);
+
+                const response = await fetch(targetUrl);
                 
-                if (response.status === 401 || response.status === 403) return { error: "Invalid API Key or Unauthorized" };
                 if (response.status === 429) return { error: "Rate limit exceeded" };
                 if (!response.ok) return { error: "BIN not found or API error" };
                 
                 const data = await response.json();
                 
-                // Safely parse the JSON (handles slight variations in API response naming conventions)
+                if (data.valid === false) {
+                    return { error: data.message || "Invalid BIN / Not Found" };
+                }
+
+                // Map the data using the specific FreeBinChecker structure
                 return {
                     bin: bin,
-                    scheme: data.scheme || data.brand || data.network || 'N/A',
-                    type: data.type || data.card_type || 'N/A',
-                    bank: (data.bank && data.bank.name) || data.bank_name || data.issuer || data.bank || 'N/A',
-                    country: (data.country && data.country.name) || data.country_name || (typeof data.country === 'string' ? data.country : 'N/A')
+                    scheme: data.card?.scheme || 'N/A',
+                    type: data.card?.type || 'N/A',
+                    bank: data.issuer?.name || 'N/A',
+                    country: data.country?.name || 'N/A',
+                    countryCode: data.country?.alpha_2 || ''
                 };
             } catch (err) {
-                return { error: "Network error. Check API Key or CORS block." };
+                console.error(err);
+                return { error: "Network error (Check CORS or internet connection)" };
             }
         }
 
+        /**
+         * Handles the manual input check
+         */
         async function checkManual() {
             const input = document.getElementById('manualInput').value;
             const resultDiv = document.getElementById('manualResult');
@@ -138,12 +137,15 @@
                         <div><p class="text-xs text-gray-500">Brand</p><p class="font-bold capitalize">${data.scheme}</p></div>
                         <div><p class="text-xs text-gray-500">Type</p><p class="font-bold capitalize ${data.type.toLowerCase() === 'credit' ? 'text-blue-600' : 'text-green-600'}">${data.type}</p></div>
                         <div><p class="text-xs text-gray-500">Bank</p><p class="font-bold">${data.bank}</p></div>
-                        <div class="col-span-2 md:col-span-4"><p class="text-xs text-gray-500">Country</p><p class="font-bold">${data.country}</p></div>
+                        <div class="col-span-2 md:col-span-4"><p class="text-xs text-gray-500">Country</p><p class="font-bold">${data.country} ${data.countryCode ? `(${data.countryCode})` : ''}</p></div>
                     </div>
                 `;
             }
         }
 
+        /**
+         * Handles CSV parsing and batch lookup
+         */
         function processCSV() {
             const fileInput = document.getElementById('csvFile');
             const file = fileInput.files[0];
@@ -194,8 +196,8 @@
 
                         const data = await fetchBinInfo(bin);
                         
-                        // Adding a brief 200ms delay to play nice with the server
-                        await new Promise(r => setTimeout(r, 200)); 
+                        // Adding a brief 500ms delay to avoid overloading their free servers
+                        await new Promise(r => setTimeout(r, 500)); 
                         
                         if (data.error) {
                             tr.innerHTML = `
