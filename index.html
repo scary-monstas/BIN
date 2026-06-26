@@ -15,7 +15,7 @@
         <!-- Header -->
         <div class="text-center">
             <h1 class="text-3xl font-bold text-gray-800">Secure BIN Lookup Tool</h1>
-            <p class="text-gray-500 mt-2">Powered by FreeBINChecker.com</p>
+            <p class="text-gray-500 mt-2">Looks up Bank, Brand, and Card Type (Credit/Debit) using only the first 6 digits.</p>
         </div>
 
         <!-- Manual Input Section -->
@@ -68,46 +68,40 @@
     </div>
 
     <script>
-        const API_URL = "https://api.freebinchecker.com/bin/";
+        // Switched to a new API with much better limits
+        const API_URL = "https://data.handyapi.com/bin/";
 
         /**
-         * Fetches BIN information from FreeBinChecker
+         * Fetches BIN information from HandyAPI
          */
         async function fetchBinInfo(cardNumber) {
             const cleanNumber = cardNumber.toString().replace(/\D/g, '');
             if (cleanNumber.length < 6) return { error: "Invalid BIN (too short)" };
             
-            // Extract the first 6 digits
             const bin = cleanNumber.substring(0, 6);
 
             try {
-                // If you get CORS errors, uncomment the proxy line below and use proxyUrl in the fetch instead
-                const targetUrl = API_URL + bin;
-                // const proxyUrl = "https://corsproxy.io/?" + encodeURIComponent(targetUrl);
-
-                const response = await fetch(targetUrl);
+                const response = await fetch(API_URL + bin);
                 
-                if (response.status === 429) return { error: "Rate limit exceeded" };
                 if (!response.ok) return { error: "BIN not found or API error" };
                 
                 const data = await response.json();
                 
-                if (data.valid === false) {
-                    return { error: data.message || "Invalid BIN / Not Found" };
+                // HandyAPI returns "Status": "SUCCESS" if it finds the BIN
+                if (data.Status !== "SUCCESS") {
+                    return { error: "BIN not found in database" };
                 }
 
-                // Map the data using the specific FreeBinChecker structure
                 return {
                     bin: bin,
-                    scheme: data.card?.scheme || 'N/A',
-                    type: data.card?.type || 'N/A',
-                    bank: data.issuer?.name || 'N/A',
-                    country: data.country?.name || 'N/A',
-                    countryCode: data.country?.alpha_2 || ''
+                    scheme: data.Scheme ? data.Scheme : 'N/A',
+                    type: data.Type ? data.Type : 'N/A',
+                    bank: data.Issuer ? data.Issuer : 'N/A',
+                    country: data.Country && data.Country.Name ? data.Country.Name : 'N/A',
+                    countryCode: data.Country && data.Country.A2 ? data.Country.A2 : ''
                 };
             } catch (err) {
-                console.error(err);
-                return { error: "Network error (Check CORS or internet connection)" };
+                return { error: "Network error fetching BIN" };
             }
         }
 
@@ -134,10 +128,10 @@
                 resultDiv.innerHTML = `
                     <div class="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-gray-50 rounded border border-gray-200 mt-2">
                         <div><p class="text-xs text-gray-500">BIN</p><p class="font-bold">${data.bin}</p></div>
-                        <div><p class="text-xs text-gray-500">Brand</p><p class="font-bold capitalize">${data.scheme}</p></div>
-                        <div><p class="text-xs text-gray-500">Type</p><p class="font-bold capitalize ${data.type.toLowerCase() === 'credit' ? 'text-blue-600' : 'text-green-600'}">${data.type}</p></div>
+                        <div><p class="text-xs text-gray-500">Brand</p><p class="font-bold">${data.scheme}</p></div>
+                        <div><p class="text-xs text-gray-500">Type</p><p class="font-bold text-blue-600">${data.type}</p></div>
                         <div><p class="text-xs text-gray-500">Bank</p><p class="font-bold">${data.bank}</p></div>
-                        <div class="col-span-2 md:col-span-4"><p class="text-xs text-gray-500">Country</p><p class="font-bold">${data.country} ${data.countryCode ? `(${data.countryCode})` : ''}</p></div>
+                        <div class="col-span-2 md:col-span-4"><p class="text-xs text-gray-500">Country</p><p class="font-bold">${data.country} (${data.countryCode})</p></div>
                     </div>
                 `;
             }
@@ -165,6 +159,7 @@
                     tbody.innerHTML = ''; 
                     const rows = results.data;
 
+                    // Automatically find the column holding the Credit Card number
                     let cardColumnKey = null;
                     if (rows.length > 0) {
                         const keys = Object.keys(rows[0]);
@@ -177,6 +172,7 @@
                         return;
                     }
 
+                    // Process rows 
                     for (let i = 0; i < rows.length; i++) {
                         const rawCardNumber = rows[i][cardColumnKey];
                         if (!rawCardNumber) continue;
@@ -186,6 +182,7 @@
 
                         const bin = cleanNumber.substring(0, 6);
                         
+                        // Create row with "Fetching..." state
                         const tr = document.createElement('tr');
                         tr.className = "border-b hover:bg-gray-50";
                         tr.innerHTML = `
@@ -194,11 +191,13 @@
                         `;
                         tbody.appendChild(tr);
 
+                        // Fetch data from new API
                         const data = await fetchBinInfo(bin);
                         
-                        // Adding a brief 500ms delay to avoid overloading their free servers
-                        await new Promise(r => setTimeout(r, 500)); 
+                        // Wait 1 second between requests so we don't spam the server and get blocked
+                        await new Promise(r => setTimeout(r, 1000)); 
                         
+                        // Update row with results
                         if (data.error) {
                             tr.innerHTML = `
                                 <td class="p-3 font-mono text-gray-700">${bin}</td>
@@ -207,8 +206,8 @@
                         } else {
                             tr.innerHTML = `
                                 <td class="p-3 font-mono text-gray-800">${data.bin}</td>
-                                <td class="p-3 text-gray-800 capitalize">${data.scheme}</td>
-                                <td class="p-3 font-semibold capitalize ${data.type.toLowerCase() === 'credit' ? 'text-blue-600' : 'text-green-600'}">${data.type}</td>
+                                <td class="p-3 text-gray-800">${data.scheme}</td>
+                                <td class="p-3 font-semibold ${data.type === 'CREDIT' ? 'text-blue-600' : 'text-green-600'}">${data.type}</td>
                                 <td class="p-3 text-gray-800">${data.bank}</td>
                                 <td class="p-3 text-gray-800">${data.country}</td>
                             `;
